@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDate, NaiveTime, Utc};
 use futures::future::join_all;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -44,8 +44,13 @@ struct Killmail {
     victim: Option<Victim>,
     attackers: Vec<Attacker>,
     killmail_time: String,
-    // Pre-formatted string for display (e.g. "1.5b")
     formatted_dropped: String,
+    #[serde(default = "default_true")]
+    is_active: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,11 +124,11 @@ struct IndexTemplate {
     kills: Vec<Killmail>,
     mapping_text: String,
     zkill_link: String,
-    days_back: u64,
-    // Display Strings
+    start_date: String,
+    end_date: String,
     total_payout_str: String,
-    payout_per_main_str: String,
-    // Tuple: (Name, Formatted Amount String)
+    // Replaced "payout per main" with total distinct humans involved
+    total_humans: usize,
     share_breakdown: Vec<(String, String)>,
     error_msg: Option<String>,
 }
@@ -133,12 +138,10 @@ struct FetchParams {
     zkill_link: String,
     mapping_input: String,
     excluded_kills: Option<String>,
-    #[serde(default = "default_days")]
-    days_back: u64,
-}
-
-fn default_days() -> u64 {
-    7
+    #[serde(default)]
+    start_date: String,
+    #[serde(default)]
+    end_date: String,
 }
 
 // --- Main ---
@@ -168,13 +171,17 @@ async fn main() {
 // --- Handlers ---
 
 async fn show_index() -> Html<String> {
+    let now = Utc::now();
+    let start = now - Duration::days(7);
+
     let template = IndexTemplate {
         kills: vec![],
         mapping_text: "".to_string(),
         zkill_link: "".to_string(),
-        days_back: 7,
+        start_date: start.format("%Y-%m-%d").to_string(),
+        end_date: now.format("%Y-%m-%d").to_string(),
         total_payout_str: "0".to_string(),
-        payout_per_main_str: "0".to_string(),
+        total_humans: 0,
         share_breakdown: vec![],
         error_msg: None,
     };
@@ -203,7 +210,6 @@ async fn process_data(
         None
     };
 
-    // 3. Update State
     let mut kills_guard = state.current_kills.lock().unwrap();
     let mut error_msg = None;
 
@@ -221,24 +227,17 @@ async fn process_data(
         }
     }
 
-    let current_map = state.character_map.lock().unwrap().clone();
+    // 3. Time Filter
+    let start_cutoff = NaiveDate::parse_from_str(&params.start_date, "%Y-%m-%d")
+        .unwrap_or_else(|_| (Utc::now() - Duration::days(7)).date_naive())
+        .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+        .and_utc();
 
-    // 4. Filter by Time
-    let cutoff = Utc::now() - Duration::days(params.days_back as i64);
+    let end_cutoff = NaiveDate::parse_from_str(&params.end_date, "%Y-%m-%d")
+        .unwrap_or_else(|_| Utc::now().date_naive())
+        .and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
+        .and_utc();
 
-    let time_filtered_kills: Vec<Killmail> = kills_guard
-        .iter()
-        .filter(|k| {
-            if let Ok(t) = DateTime::parse_from_rfc3339(&k.killmail_time) {
-                t.with_timezone(&Utc) > cutoff
-            } else {
-                false
-            }
-        })
-        .cloned()
-        .collect();
-
-    // 5. Filter Excluded IDs
     let excluded_ids: HashSet<i32> = params
         .excluded_kills
         .as_deref()
@@ -247,33 +246,62 @@ async fn process_data(
         .filter_map(|s| s.trim().parse().ok())
         .collect();
 
-    let final_kills: Vec<Killmail> = time_filtered_kills
-        .into_iter()
-        .filter(|k| !excluded_ids.contains(&k.killmail_id))
+    // 4. Construct Final List
+    let final_kills: Vec<Killmail> = kills_guard
+        .iter()
+        .filter(|k| {
+            if k.zkb.droppedValue <= 0.0 {
+                return false;
+            }
+            if let Ok(t) = DateTime::parse_from_rfc3339(&k.killmail_time) {
+                let t_utc = t.with_timezone(&Utc);
+                t_utc >= start_cutoff && t_utc <= end_cutoff
+            } else {
+                false
+            }
+        })
+        .map(|k| {
+            let mut km = k.clone();
+            km.is_active = !excluded_ids.contains(&k.killmail_id);
+            km
+        })
         .collect();
 
-    // 6. Calculate Payout
+    // 5. Calculate Payout (PER KILL LOGIC)
+    let current_map = state.character_map.lock().unwrap().clone();
+
+    // Accumulators
+    let mut main_wallets: HashMap<String, f64> = HashMap::new();
     let mut total_dropped_value = 0.0;
-    let mut unique_humans: HashSet<String> = HashSet::new();
 
     for kill in &final_kills {
+        // Skip excluded kills
+        if !kill.is_active {
+            continue;
+        }
+
         total_dropped_value += kill.zkb.droppedValue;
+
+        // A. Find unique Mains on THIS specific kill
+        let mut kill_participants: HashSet<String> = HashSet::new();
         for attacker in &kill.attackers {
             if let Some(name) = &attacker.character_name {
                 let main = current_map.get(name).unwrap_or(name);
-                unique_humans.insert(main.clone());
+                kill_participants.insert(main.clone());
             }
+        }
+
+        // B. Calculate Share for this kill
+        let participant_count = kill_participants.len().max(1) as f64;
+        let share_per_pilot = kill.zkb.droppedValue / participant_count;
+
+        // C. Deposit into wallets
+        for main in kill_participants {
+            *main_wallets.entry(main).or_insert(0.0) += share_per_pilot;
         }
     }
 
-    let human_count = unique_humans.len().max(1) as f64;
-    let payout_per_human = total_dropped_value / human_count;
-
-    // Create sorted breakdown with formatted strings
-    let mut breakdown: Vec<_> = unique_humans
-        .into_iter()
-        .map(|h| (h, payout_per_human))
-        .collect();
+    let mut breakdown: Vec<_> = main_wallets.into_iter().collect();
     breakdown.sort_by(|a, b| a.0.cmp(&b.0));
 
     let formatted_breakdown: Vec<(String, String)> = breakdown
@@ -285,9 +313,10 @@ async fn process_data(
         kills: final_kills,
         mapping_text: params.mapping_input,
         zkill_link: params.zkill_link,
-        days_back: params.days_back,
+        start_date: params.start_date,
+        end_date: params.end_date,
         total_payout_str: format_isk(total_dropped_value),
-        payout_per_main_str: format_isk(payout_per_human),
+        total_humans: formatted_breakdown.len(),
         share_breakdown: formatted_breakdown,
         error_msg,
     };
@@ -295,10 +324,9 @@ async fn process_data(
     Html(template.render().unwrap())
 }
 
-// --- Logic ---
+// --- Logic (Unchanged from before) ---
 
 async fn fetch_zkill_data(user_url: &str, state: &Arc<AppState>) -> Result<Vec<Killmail>, String> {
-    // A. Parse URL
     let caps = ZKILL_URL_REGEX
         .captures(user_url)
         .ok_or("Invalid ZKillboard Link format")?;
@@ -318,14 +346,13 @@ async fn fetch_zkill_data(user_url: &str, state: &Arc<AppState>) -> Result<Vec<K
     println!("Step 1: Fetching List from ZKill: {}", zkill_list_url);
 
     let client = Client::builder()
-        .user_agent("EveLooter/1.2 (maintainer: admin@example.com)")
+        .user_agent("EveLooter/1.5 (maintainer: lu.nemec@gmail.com)")
         .gzip(true)
         .brotli(true)
         .deflate(true)
         .build()
         .map_err(|e| e.to_string())?;
 
-    // B. Fetch ZKill Summary
     let resp = client
         .get(&zkill_list_url)
         .send()
@@ -340,18 +367,21 @@ async fn fetch_zkill_data(user_url: &str, state: &Arc<AppState>) -> Result<Vec<K
         .await
         .map_err(|e| format!("Failed to parse ZKill List: {}", e))?;
 
-    // C. Cache Check (ESI Structure)
+    let worthwhile_kills: Vec<RawZKillItem> = raw_list
+        .into_iter()
+        .filter(|k| k.zkb.droppedValue > 0.0)
+        .collect();
+
     let mut to_fetch = Vec::new();
     {
         let cache = state.esi_cache.lock().unwrap();
-        for item in &raw_list {
+        for item in &worthwhile_kills {
             if !cache.contains_key(&item.killmail_id) {
                 to_fetch.push(item);
             }
         }
     }
 
-    // D. Fetch Missing ESI Data
     if !to_fetch.is_empty() {
         println!("Fetching {} items from ESI...", to_fetch.len());
         let mut tasks = Vec::new();
@@ -386,15 +416,13 @@ async fn fetch_zkill_data(user_url: &str, state: &Arc<AppState>) -> Result<Vec<K
         }
     }
 
-    // E. NAME RESOLUTION STEP
     let mut ids_to_resolve = HashSet::new();
     {
         let esi_cache = state.esi_cache.lock().unwrap();
         let name_cache = state.name_cache.lock().unwrap();
 
-        for item in &raw_list {
+        for item in &worthwhile_kills {
             if let Some(esi_data) = esi_cache.get(&item.killmail_id) {
-                // Victim
                 if let Some(id) = esi_data.victim.character_id {
                     if !name_cache.contains_key(&id) {
                         ids_to_resolve.insert(id);
@@ -405,7 +433,6 @@ async fn fetch_zkill_data(user_url: &str, state: &Arc<AppState>) -> Result<Vec<K
                         ids_to_resolve.insert(id);
                     }
                 }
-                // Attackers
                 for att in &esi_data.attackers {
                     if let Some(id) = att.character_id {
                         if !name_cache.contains_key(&id) {
@@ -420,11 +447,9 @@ async fn fetch_zkill_data(user_url: &str, state: &Arc<AppState>) -> Result<Vec<K
     if !ids_to_resolve.is_empty() {
         println!("Resolving {} names via ESI...", ids_to_resolve.len());
         let ids_vec: Vec<i32> = ids_to_resolve.into_iter().collect();
-
         for chunk in ids_vec.chunks(1000) {
             let url = "https://esi.evetech.net/v1/universe/names/?datasource=tranquility";
             let resp = client.post(url).json(&chunk).send().await;
-
             if let Ok(r) = resp {
                 if r.status().is_success() {
                     if let Ok(entries) = r.json::<Vec<EsiNameEntry>>().await {
@@ -438,12 +463,11 @@ async fn fetch_zkill_data(user_url: &str, state: &Arc<AppState>) -> Result<Vec<K
         }
     }
 
-    // F. Construct Final Structs
     let mut final_kills = Vec::new();
     let esi_cache = state.esi_cache.lock().unwrap();
     let name_cache = state.name_cache.lock().unwrap();
 
-    for item in raw_list {
+    for item in worthwhile_kills {
         if let Some(esi_data) = esi_cache.get(&item.killmail_id) {
             let disp_victim = Victim {
                 character_id: esi_data.victim.character_id,
@@ -468,12 +492,12 @@ async fn fetch_zkill_data(user_url: &str, state: &Arc<AppState>) -> Result<Vec<K
 
             final_kills.push(Killmail {
                 killmail_id: item.killmail_id,
-                zkb: item.zkb.clone(), // Clone to get droppedValue
+                zkb: item.zkb.clone(),
                 victim: Some(disp_victim),
                 attackers: disp_attackers,
                 killmail_time: esi_data.killmail_time.clone(),
-                // FORMATTED VALUE CALCULATED HERE
                 formatted_dropped: format_isk(item.zkb.droppedValue),
+                is_active: true,
             });
         }
     }

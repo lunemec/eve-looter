@@ -41,7 +41,7 @@
       }
 
       input[type="text"],
-      input[type="number"],
+      input[type="date"],
       textarea {
         width: 100%;
         box-sizing: border-box;
@@ -87,7 +87,6 @@
         border-bottom: none;
       }
 
-      /* ZKILL STYLE TABLE */
       .zkill-table {
         width: 100%;
         border-collapse: separate;
@@ -100,6 +99,15 @@
       }
       .zkill-row:hover {
         background: #2a2a2a;
+      }
+
+      /* EXCLUDED ROW STYLE */
+      .zkill-row.excluded {
+        opacity: 0.4;
+        background: #181818;
+      }
+      .zkill-row.excluded td:first-child {
+        border-left-color: #444;
       }
 
       .zkill-row td {
@@ -199,7 +207,9 @@
         );
         let excluded = [];
         checkboxes.forEach((cb) => {
-          if (!cb.checked) excluded.push(cb.value);
+          if (!cb.checked) {
+            excluded.push(cb.value);
+          }
         });
         document.getElementById("excluded_input").value = excluded.join(",");
         document.getElementById("mainForm").submit();
@@ -250,14 +260,12 @@
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
             <div>
-              <label>Days Back</label>
-              <input
-                type="number"
-                name="days_back"
-                value="{{ days_back }}"
-                min="1"
-                max="90"
-              />
+              <label>Start Date</label>
+              <input type="date" name="start_date" value="{{ start_date }}" />
+            </div>
+            <div>
+              <label>End Date</label>
+              <input type="date" name="end_date" value="{{ end_date }}" />
             </div>
           </div>
 
@@ -302,10 +310,10 @@
               "
             >
               <div style="color: #888; font-size: 0.9em; margin-bottom: 5px">
-                SPLIT PER MAIN
+                ACTIVE PILOTS
               </div>
               <div style="color: #fff; font-size: 1.5em; font-weight: bold">
-                {{ payout_per_main_str }} <small>ISK</small>
+                {{ total_humans }}
               </div>
             </div>
           </div>
@@ -333,9 +341,7 @@
             "
           >
             <h3>3. Kill Log</h3>
-            <small
-              >Uncheck boxes to exclude specific kills from calculation.</small
-            >
+            <small>Zero-value drops are hidden.</small>
           </div>
 
           <table class="zkill-table">
@@ -352,13 +358,18 @@
             </thead>
             <tbody>
               {% for kill in kills %}
-              <tr class="zkill-row">
+              <tr class="zkill-row {% if !kill.is_active %}excluded{% endif %}">
                 <td class="check-cell">
                   <input
                     type="checkbox"
                     name="active_kill"
                     value="{{ kill.killmail_id }}"
-                    checked
+                    {%
+                    if
+                    kill.is_active
+                    %}checked{%
+                    endif
+                    %}
                     onchange="submitForm()"
                   />
                 </td>
