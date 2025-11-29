@@ -1,0 +1,28 @@
+<div class="card">
+  <h3>1. Configuration</h3>
+  <label>ZKillboard Link (Corp / System / Alliance)</label>
+  <input
+    type="text"
+    name="zkill_link"
+    placeholder="https://zkillboard.com/system/3000xxxx/"
+    value="{{ zkill_link }}"
+  />
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+    <div>
+      <label>Start Date</label>
+      <input type="date" name="start_date" value="{{ start_date }}" />
+    </div>
+    <div>
+      <label>End Date</label>
+      <input type="date" name="end_date" value="{{ end_date }}" />
+    </div>
+  </div>
+
+  <label>Alt Mapping <small>(Alt = Main)</small></label>
+  <textarea name="mapping_input" rows="6" placeholder="AltName = MainName">
+{{ mapping_text }}</textarea
+  >
+
+  <button type="button" onclick="submitForm()">Fetch & Calculate</button>
+</div>

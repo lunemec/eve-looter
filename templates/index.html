@@ -1,413 +1,50 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>EVE Looter</title>
-    <style>
-      /* Base Dark Theme */
-      body {
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        background: #111;
-        color: #e0e0e0;
-        padding: 20px;
-        margin: 0;
-      }
-      .container {
-        max-width: 1100px;
-        margin: 0 auto;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 20px;
-      }
-      .full-width {
-        grid-column: span 2;
-      }
-      .card {
-        background: #1b1b1b;
-        padding: 20px;
-        border-radius: 4px;
-        border: 1px solid #2a2a2a;
-      }
-
-      h1,
-      h3,
-      h4 {
-        margin-top: 0;
-        color: #fff;
-        font-weight: 600;
-      }
-      small {
-        color: #666;
-      }
-
-      input[type="text"],
-      input[type="date"],
-      textarea {
-        width: 100%;
-        box-sizing: border-box;
-        background: #252525;
-        border: 1px solid #333;
-        color: white;
-        padding: 8px;
-        margin-bottom: 10px;
-        font-family: monospace;
-      }
-      input:focus,
-      textarea:focus {
-        border-color: #007acc;
-        outline: none;
-      }
-
-      button {
-        background: #007acc;
-        color: white;
-        padding: 12px 24px;
-        border: none;
-        cursor: pointer;
-        font-size: 16px;
-        border-radius: 2px;
-        width: 100%;
-        font-weight: bold;
-        transition: background 0.2s;
-      }
-      button:hover {
-        background: #005f9e;
-      }
-
-      .payout-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.9em;
-      }
-      .payout-table td {
-        padding: 6px;
-        border-bottom: 1px solid #333;
-      }
-      .payout-table tr:last-child td {
-        border-bottom: none;
-      }
-
-      .zkill-table {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 0 4px;
-      }
-
-      .zkill-row {
-        background: #222;
-        transition: background 0.1s;
-      }
-      .zkill-row:hover {
-        background: #2a2a2a;
-      }
-
-      /* EXCLUDED ROW STYLE */
-      .zkill-row.excluded {
-        opacity: 0.4;
-        background: #181818;
-      }
-      .zkill-row.excluded td:first-child {
-        border-left-color: #444;
-      }
-
-      .zkill-row td {
-        padding: 8px 12px;
-        vertical-align: middle;
-      }
-
-      .zkill-row td:first-child {
-        border-left: 4px solid #5cb85c;
-        border-top-left-radius: 3px;
-        border-bottom-left-radius: 3px;
-      }
-      .zkill-row td:last-child {
-        border-top-right-radius: 3px;
-        border-bottom-right-radius: 3px;
-      }
-
-      .check-cell {
-        width: 30px;
-        text-align: center;
-      }
-      input[type="checkbox"] {
-        transform: scale(1.2);
-        cursor: pointer;
-        accent-color: #5cb85c;
-      }
-
-      .time-cell {
-        font-family: monospace;
-        font-size: 0.85em;
-        white-space: nowrap;
-        width: 140px;
-      }
-      .time-cell a {
-        color: #aaa;
-        text-decoration: none;
-      }
-      .time-cell a:hover {
-        color: #fff;
-        text-decoration: underline;
-      }
-
-      .victim-cell {
-        line-height: 1.3;
-      }
-      .victim-name {
-        display: block;
-        color: #fff;
-        font-weight: bold;
-        font-size: 1em;
-      }
-      .victim-corp {
-        display: block;
-        color: #777;
-        font-size: 0.85em;
-      }
-
-      .attacker-cell {
-        text-align: center;
-        color: #aaa;
-        font-size: 0.9em;
-        width: 80px;
-      }
-
-      .value-cell {
-        text-align: right;
-        white-space: nowrap;
-      }
-      .money {
-        color: #5cb85c;
-        font-family: monospace;
-        font-weight: bold;
-        font-size: 1.1em;
-      }
-      .money-muted {
-        color: #444;
-        font-size: 0.8em;
-      }
-
-      .error {
-        color: #ff5252;
-        background: #3b1e1e;
-        padding: 10px;
-        border-radius: 4px;
-        margin-bottom: 20px;
-        border: 1px solid #5a2a2a;
-      }
-      .scroll-list {
-        max-height: 300px;
-        overflow-y: auto;
-      }
-    </style>
-    <script>
-      function submitForm() {
-        const checkboxes = document.querySelectorAll(
-          'input[name="active_kill"]',
-        );
-        let excluded = [];
-        checkboxes.forEach((cb) => {
-          if (!cb.checked) {
-            excluded.push(cb.value);
-          }
-        });
-        document.getElementById("excluded_input").value = excluded.join(",");
-        document.getElementById("mainForm").submit();
-      }
-    </script>
-  </head>
-  <body>
+<head>
+    {% include "partials/head.html" %}
+</head>
+<body>
     <div class="container">
-      <div
-        class="full-width"
-        style="
-          margin-bottom: 10px;
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-        "
-      >
-        <h1>EVE Looter <small>ZKillboard Parser</small></h1>
-      </div>
-
-      {% if let Some(err) = error_msg %}
-      <div class="full-width error"><strong>Error:</strong> {{ err }}</div>
-      {% endif %}
-
-      <form
-        id="mainForm"
-        action="/process"
-        method="POST"
-        class="full-width"
-        style="display: contents"
-      >
-        <input
-          type="hidden"
-          id="excluded_input"
-          name="excluded_kills"
-          value=""
-        />
-
-        <div class="card">
-          <h3>1. Configuration</h3>
-          <label>ZKillboard Link (Corp / System / Alliance)</label>
-          <input
-            type="text"
-            name="zkill_link"
-            placeholder="https://zkillboard.com/system/3000xxxx/"
-            value="{{ zkill_link }}"
-          />
-
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
-            <div>
-              <label>Start Date</label>
-              <input type="date" name="start_date" value="{{ start_date }}" />
-            </div>
-            <div>
-              <label>End Date</label>
-              <input type="date" name="end_date" value="{{ end_date }}" />
-            </div>
-          </div>
-
-          <label>Alt Mapping <small>(Alt = Main)</small></label>
-          <textarea
-            name="mapping_input"
-            rows="6"
-            placeholder="AltName = MainName"
-          >
-{{ mapping_text }}</textarea
-          >
-
-          <button type="button" onclick="submitForm()">
-            Fetch & Calculate
-          </button>
+        <div class="full-width" style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end;">
+            <h1>EVE Looter <small>ZKillboard Parser</small></h1>
         </div>
 
-        <div class="card">
-          <h3>2. Estimated Payout</h3>
-          <div
-            style="
-              background: #111;
-              padding: 15px;
-              border-radius: 4px;
-              border: 1px solid #333;
-              margin-bottom: 15px;
-              text-align: center;
-            "
-          >
-            <div style="color: #888; font-size: 0.9em; margin-bottom: 5px">
-              TOTAL DROPPED VALUE
-            </div>
-            <div class="money" style="font-size: 2em">
-              {{ total_payout_str }} <small>ISK</small>
-            </div>
+        {% if let Some(err) = error_msg %}
+        <div class="full-width error"><strong>Error:</strong> {{ err }}</div>
+        {% endif %}
 
-            <div
-              style="
-                margin-top: 15px;
-                border-top: 1px solid #333;
-                padding-top: 10px;
-              "
-            >
-              <div style="color: #888; font-size: 0.9em; margin-bottom: 5px">
-                ACTIVE PILOTS
-              </div>
-              <div style="color: #fff; font-size: 1.5em; font-weight: bold">
-                {{ total_humans }}
-              </div>
-            </div>
-          </div>
-
-          <h4>Beneficiaries ({{ share_breakdown.len() }})</h4>
-          <div>
-            <table class="payout-table">
-              {% for (main, share) in share_breakdown %}
-              <tr>
-                <td>{{ main }}</td>
-                <td style="text-align: right; color: #fff">{{ share }} ISK</td>
-              </tr>
-              {% endfor %}
-            </table>
-          </div>
-        </div>
-
-        <div class="card full-width">
-          <div
-            style="
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              margin-bottom: 15px;
-            "
-          >
-            <h3>3. Kill Log</h3>
-            <small>Zero-value drops are hidden.</small>
-          </div>
-
-          <table class="zkill-table">
-            <thead>
-              <tr
-                style="color: #666; font-size: 0.8em; text-transform: uppercase"
-              >
-                <th></th>
-                <th>Time</th>
-                <th>Victim / Corp</th>
-                <th style="text-align: center">Attackers</th>
-                <th style="text-align: right">Dropped Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for kill in kills %}
-              <tr class="zkill-row {% if !kill.is_active %}excluded{% endif %}">
-                <td class="check-cell">
-                  <input
-                    type="checkbox"
-                    name="active_kill"
-                    value="{{ kill.killmail_id }}"
-                    {%
-                    if
-                    kill.is_active
-                    %}checked{%
-                    endif
-                    %}
-                    onchange="submitForm()"
-                  />
-                </td>
-
-                <td class="time-cell">
-                  <a
-                    href="https://zkillboard.com/kill/{{ kill.killmail_id }}/"
-                    target="_blank"
-                    >{{ kill.killmail_time }}</a
-                  >
-                </td>
-
-                <td class="victim-cell">
-                  {% if let Some(v) = kill.victim %}
-                  <span class="victim-name"
-                    >{{ v.character_name.as_deref().unwrap_or("Unknown")
-                    }}</span
-                  >
-                  <span class="victim-corp"
-                    >{{ v.corporation_name.as_deref().unwrap_or("-") }}</span
-                  >
-                  {% else %}
-                  <span class="victim-name">Loading...</span>
-                  {% endif %}
-                </td>
-
-                <td class="attacker-cell">{{ kill.attackers.len() }}</td>
-
-                <td class="value-cell">
-                  <div class="money">{{ kill.formatted_dropped }}</div>
-                  <div class="money-muted">Dropped</div>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </form>
+        <form id="mainForm" action="/process" method="POST" class="full-width" style="display: contents;">
+            <!-- Hidden inputs for exclusions -->
+            <input type="hidden" id="excluded_input" name="excluded_kills" value="">
+            <input type="hidden" id="excluded_ben_input" name="excluded_beneficiaries" value="">
+            
+            {% include "partials/configuration.html" %}
+            {% include "partials/payout.html" %}
+            {% include "partials/kill_list.html" %}
+        </form>
     </div>
-  </body>
+
+    <script>
+        function submitForm() {
+            // 1. Collect Excluded Kills
+            const killCBs = document.querySelectorAll('input[name="active_kill"]');
+            let excludedKills = [];
+            killCBs.forEach((cb) => { 
+                if (!cb.checked) excludedKills.push(cb.value); 
+            });
+            document.getElementById('excluded_input').value = excludedKills.join(',');
+
+            // 2. Collect Excluded Beneficiaries
+            const benCBs = document.querySelectorAll('input[name="active_beneficiary"]');
+            let excludedBen = [];
+            benCBs.forEach((cb) => { 
+                if (!cb.checked) excludedBen.push(cb.value); 
+            });
+            document.getElementById('excluded_ben_input').value = excludedBen.join(',');
+
+            // 3. Submit
+            document.getElementById('mainForm').submit();
+        }
+    </script>
+</body>
 </html>

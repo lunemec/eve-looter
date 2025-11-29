@@ -1,0 +1,73 @@
+<div class="card full-width">
+  <div
+    style="
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    "
+  >
+    <h3>3. Kill Log</h3>
+    <small>Zero-value drops are hidden.</small>
+  </div>
+
+  <table class="zkill-table">
+    <thead>
+      <tr style="color: #666; font-size: 0.8em; text-transform: uppercase">
+        <th></th>
+        <th>Time</th>
+        <th>Victim / Corp</th>
+        <th style="text-align: center">Attackers</th>
+        <th style="text-align: right">Dropped Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for kill in kills %}
+      <tr class="zkill-row {% if !kill.is_active %}excluded{% endif %}">
+        <td class="check-cell">
+          <input
+            type="checkbox"
+            name="active_kill"
+            value="{{ kill.killmail_id }}"
+            {%
+            if
+            kill.is_active
+            %}checked{%
+            endif
+            %}
+            onchange="submitForm()"
+          />
+        </td>
+
+        <td class="time-cell">
+          <a
+            href="https://zkillboard.com/kill/{{ kill.killmail_id }}/"
+            target="_blank"
+            >{{ kill.killmail_time }}</a
+          >
+        </td>
+
+        <td class="victim-cell">
+          {% if let Some(v) = kill.victim %}
+          <span class="victim-name"
+            >{{ v.character_name.as_deref().unwrap_or("Unknown") }}</span
+          >
+          <span class="victim-corp"
+            >{{ v.corporation_name.as_deref().unwrap_or("-") }}</span
+          >
+          {% else %}
+          <span class="victim-name">Loading...</span>
+          {% endif %}
+        </td>
+
+        <td class="attacker-cell">{{ kill.attackers.len() }}</td>
+
+        <td class="value-cell">
+          <div class="money">{{ kill.formatted_dropped }}</div>
+          <div class="money-muted">Dropped</div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
