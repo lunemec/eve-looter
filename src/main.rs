@@ -145,6 +145,24 @@ async fn process_data(
         .and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
         .and_utc();
 
+    // Enforce 30 Day Limit: Error if window is too large
+    if (end_cutoff - start_cutoff).num_days() > 30 {
+        let template = IndexTemplate {
+            kills: vec![],
+            mapping_text: params.mapping_input,
+            zkill_link: params.zkill_link,
+            start_date: params.start_date,
+            end_date: params.end_date,
+            total_payout_str: "0".to_string(),
+            total_humans: 0,
+            beneficiaries: vec![],
+            error_msg: Some(
+                "Timeframe exceeds 30 days. Please select a shorter range.".to_string(),
+            ),
+        };
+        return Html(template.render().unwrap());
+    }
+
     let excluded_ids: HashSet<i32> = params
         .excluded_kills
         .as_deref()
@@ -256,8 +274,9 @@ async fn process_data(
         kills: final_kills,
         mapping_text: params.mapping_input,
         zkill_link: params.zkill_link,
-        start_date: params.start_date,
-        end_date: params.end_date,
+        // Send back the ACTUAL dates used (in case we clamped them)
+        start_date: start_cutoff.format("%Y-%m-%d").to_string(),
+        end_date: end_cutoff.format("%Y-%m-%d").to_string(),
         total_payout_str: format_isk(total_dropped_value),
         total_humans: active_humans,
         beneficiaries,
