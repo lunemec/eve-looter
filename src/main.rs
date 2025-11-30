@@ -16,6 +16,8 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tower_http::compression::CompressionLayer;
+use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info};
 
 // --- View Models ---
@@ -61,12 +63,18 @@ struct FetchParams {
 
 #[tokio::main]
 async fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "eve_looter=info,tower_http=debug");
+    }
+
     tracing_subscriber::fmt::init();
     let state = Arc::new(AppState::new());
 
     let app = Router::new()
         .route("/", get(show_index))
         .route("/process", post(process_data))
+        .layer(TraceLayer::new_for_http())
+        .layer(CompressionLayer::new())
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

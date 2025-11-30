@@ -1,6 +1,6 @@
 # --- Stage 1: Builder ---
 # Use the Alpine-based Rust image for a much smaller footprint and musl compilation
-FROM rust:1.89-alpine as builder
+FROM rust:1.89-alpine AS builder
 
 WORKDIR /usr/src/app
 
