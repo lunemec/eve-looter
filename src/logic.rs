@@ -34,7 +34,7 @@ pub async fn fetch_zkill_data(
     };
 
     let client = Client::builder()
-        .user_agent("EveLooter/1.9 (maintainer: admin@example.com)")
+        .user_agent("EveLooter (maintainer: lu.nemec@gmail.com)")
         .gzip(true)
         .brotli(true)
         .deflate(true)
