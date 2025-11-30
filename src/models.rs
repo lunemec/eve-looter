@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-// --- Helper: Human Readable ISK ---
 pub fn format_isk(amount: f64) -> String {
     let abs_amount = amount.abs();
     if abs_amount >= 1_000_000_000_000.0 {
@@ -18,7 +17,6 @@ pub fn format_isk(amount: f64) -> String {
     }
 }
 
-// --- App State ---
 pub struct AppState {
     pub current_kills: Mutex<Vec<Killmail>>,
     pub character_map: Mutex<HashMap<String, String>>,
@@ -37,8 +35,6 @@ impl AppState {
     }
 }
 
-// --- Main Domain Objects ---
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Killmail {
     pub killmail_id: i32,
@@ -47,6 +43,9 @@ pub struct Killmail {
     pub attackers: Vec<Attacker>,
     pub killmail_time: String,
     pub formatted_dropped: String,
+    // NEW: System info
+    pub solar_system_id: i32,
+    pub solar_system_name: Option<String>,
     #[serde(default = "default_true")]
     pub is_active: bool,
 }
@@ -75,6 +74,9 @@ pub struct Victim {
     pub character_id: Option<i32>,
     pub character_name: Option<String>,
     pub corporation_name: Option<String>,
+    // NEW: Ship info
+    pub ship_type_id: i32,
+    pub ship_type_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,9 +84,9 @@ pub struct Attacker {
     pub character_id: Option<i32>,
     pub character_name: Option<String>,
     pub corporation_id: Option<i32>,
+    // NEW: Killer flag
+    pub final_blow: bool,
 }
-
-// --- Fetching / ESI Intermediate Structs ---
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawZKillItem {
@@ -95,6 +97,7 @@ pub struct RawZKillItem {
 #[derive(Debug, Clone, Deserialize)]
 pub struct EsiKillmail {
     pub killmail_time: String,
+    pub solar_system_id: i32, // NEW
     pub victim: EsiVictim,
     pub attackers: Vec<EsiAttacker>,
 }
@@ -103,12 +106,14 @@ pub struct EsiKillmail {
 pub struct EsiVictim {
     pub character_id: Option<i32>,
     pub corporation_id: Option<i32>,
+    pub ship_type_id: i32, // NEW
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct EsiAttacker {
     pub character_id: Option<i32>,
     pub corporation_id: Option<i32>,
+    pub final_blow: bool, // NEW
 }
 
 #[derive(Debug, Clone, Deserialize)]

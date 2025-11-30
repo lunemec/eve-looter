@@ -16,7 +16,7 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{debug, error, info}; // Import tracing macros
+use tracing::{debug, error, info};
 
 // --- View Models ---
 
@@ -26,10 +26,15 @@ struct BeneficiaryDisplay {
     is_active: bool,
 }
 
+struct DailyGroup {
+    date_display: String,
+    kills: Vec<Killmail>,
+}
+
 #[derive(Template)]
 #[template(path = "index.html")]
 struct IndexTemplate {
-    kills: Vec<Killmail>,
+    daily_groups: Vec<DailyGroup>,
     mapping_text: String,
     zkill_link: String,
     start_date: String,
@@ -56,9 +61,7 @@ struct FetchParams {
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing (logs to stdout by default)
     tracing_subscriber::fmt::init();
-
     let state = Arc::new(AppState::new());
 
     let app = Router::new()
@@ -67,7 +70,7 @@ async fn main() {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    info!("EVE Looter running on http://{}", addr); // Changed to info!
+    info!("EVE Looter running on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -79,7 +82,7 @@ async fn show_index() -> Html<String> {
     let start = now - Duration::days(7);
 
     let template = IndexTemplate {
-        kills: vec![],
+        daily_groups: vec![],
         mapping_text: "".to_string(),
         zkill_link: "".to_string(),
         start_date: start.format("%Y-%m-%d").to_string(),
@@ -96,9 +99,39 @@ async fn process_data(
     State(state): State<Arc<AppState>>,
     Form(params): Form<FetchParams>,
 ) -> Html<String> {
-    info!("Received process request for link: {}", params.zkill_link);
+    info!("Processing request for: {}", params.zkill_link);
 
-    // 1. Update Mapping
+    // 1. Time Filter Setup
+    let start_cutoff = NaiveDate::parse_from_str(&params.start_date, "%Y-%m-%d")
+        .unwrap_or_else(|_| (Utc::now() - Duration::days(7)).date_naive())
+        .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+        .and_utc();
+
+    let end_cutoff = NaiveDate::parse_from_str(&params.end_date, "%Y-%m-%d")
+        .unwrap_or_else(|_| Utc::now().date_naive())
+        .and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
+        .and_utc();
+
+    debug!("Time window: {} to {}", start_cutoff, end_cutoff);
+
+    if (end_cutoff - start_cutoff).num_days() > 30 {
+        let template = IndexTemplate {
+            daily_groups: vec![],
+            mapping_text: params.mapping_input,
+            zkill_link: params.zkill_link,
+            start_date: params.start_date,
+            end_date: params.end_date,
+            total_payout_str: "0".to_string(),
+            total_humans: 0,
+            beneficiaries: vec![],
+            error_msg: Some(
+                "Timeframe exceeds 30 days. Please select a shorter range.".to_string(),
+            ),
+        };
+        return Html(template.render().unwrap());
+    }
+
+    // 2. Update Mapping
     {
         let mut map_guard = state.character_map.lock().unwrap();
         map_guard.clear();
@@ -107,12 +140,11 @@ async fn process_data(
                 map_guard.insert(alt.trim().to_string(), main.trim().to_string());
             }
         }
-        debug!("Updated character mapping with {} entries", map_guard.len());
     }
 
-    // 2. Fetch Data
+    // 3. Fetch Data
     let fetch_result = if !params.zkill_link.is_empty() {
-        Some(fetch_zkill_data(&params.zkill_link, &state).await)
+        Some(fetch_zkill_data(&params.zkill_link, &state, start_cutoff).await)
     } else {
         None
     };
@@ -134,35 +166,6 @@ async fn process_data(
         }
     }
 
-    // 3. Time Filter
-    let start_cutoff = NaiveDate::parse_from_str(&params.start_date, "%Y-%m-%d")
-        .unwrap_or_else(|_| (Utc::now() - Duration::days(7)).date_naive())
-        .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
-        .and_utc();
-
-    let end_cutoff = NaiveDate::parse_from_str(&params.end_date, "%Y-%m-%d")
-        .unwrap_or_else(|_| Utc::now().date_naive())
-        .and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
-        .and_utc();
-
-    // Enforce 30 Day Limit: Error if window is too large
-    if (end_cutoff - start_cutoff).num_days() > 30 {
-        let template = IndexTemplate {
-            kills: vec![],
-            mapping_text: params.mapping_input,
-            zkill_link: params.zkill_link,
-            start_date: params.start_date,
-            end_date: params.end_date,
-            total_payout_str: "0".to_string(),
-            total_humans: 0,
-            beneficiaries: vec![],
-            error_msg: Some(
-                "Timeframe exceeds 30 days. Please select a shorter range.".to_string(),
-            ),
-        };
-        return Html(template.render().unwrap());
-    }
-
     let excluded_ids: HashSet<i32> = params
         .excluded_kills
         .as_deref()
@@ -171,7 +174,6 @@ async fn process_data(
         .filter_map(|s| s.trim().parse().ok())
         .collect();
 
-    // 4. Parse Excluded Beneficiaries
     let excluded_names: HashSet<String> = params
         .excluded_beneficiaries
         .as_deref()
@@ -181,7 +183,7 @@ async fn process_data(
         .filter(|s| !s.is_empty())
         .collect();
 
-    // 5. Filter & Tag Active Kills
+    // 4. Filter Active Kills
     let final_kills: Vec<Killmail> = kills_guard
         .iter()
         .filter(|k| {
@@ -202,15 +204,10 @@ async fn process_data(
         })
         .collect();
 
-    debug!(
-        "Filtered kills: {} total, {} excluded by user",
-        final_kills.len(),
-        excluded_ids.len()
-    );
+    debug!("Active kills in range: {}", final_kills.len());
 
-    // 6. Calculate Payout
+    // 5. Calculate Payout
     let current_map = state.character_map.lock().unwrap().clone();
-
     let mut all_seen_mains: HashSet<String> = HashSet::new();
     let mut main_wallets: HashMap<String, f64> = HashMap::new();
     let mut total_dropped_value = 0.0;
@@ -222,22 +219,17 @@ async fn process_data(
 
         total_dropped_value += kill.zkb.dropped_value;
 
-        // A. Identify all potential participants
         let mut kill_participants: HashSet<String> = HashSet::new();
-
         for attacker in &kill.attackers {
             if let Some(name) = &attacker.character_name {
                 let main = current_map.get(name).unwrap_or(name);
                 all_seen_mains.insert(main.clone());
-
-                // Only include in division if NOT excluded
                 if !excluded_names.contains(main) {
                     kill_participants.insert(main.clone());
                 }
             }
         }
 
-        // B. Calculate Share
         if kill_participants.is_empty() {
             continue;
         }
@@ -250,7 +242,7 @@ async fn process_data(
         }
     }
 
-    // 7. Construct Display List
+    // 6. Beneficiaries List
     let mut beneficiaries = Vec::new();
     for main in all_seen_mains {
         let amount = *main_wallets.get(&main).unwrap_or(&0.0);
@@ -261,22 +253,39 @@ async fn process_data(
         });
     }
     beneficiaries.sort_by(|a, b| a.name.cmp(&b.name));
-
     let active_humans = beneficiaries.iter().filter(|b| b.is_active).count();
 
-    info!(
-        "Calculation complete. Total Value: {}, Active Pilots: {}",
-        format_isk(total_dropped_value),
-        active_humans
-    );
+    // 7. Grouping
+    let mut groups_map: HashMap<String, Vec<Killmail>> = HashMap::new();
+    for kill in final_kills {
+        let date_str = kill
+            .killmail_time
+            .split('T')
+            .next()
+            .unwrap_or("Unknown")
+            .to_string();
+        groups_map.entry(date_str).or_default().push(kill);
+    }
+
+    let mut daily_groups = Vec::new();
+    let mut dates: Vec<String> = groups_map.keys().cloned().collect();
+    dates.sort_by(|a, b| b.cmp(a));
+
+    for date in dates {
+        if let Some(kills) = groups_map.remove(&date) {
+            daily_groups.push(DailyGroup {
+                date_display: date,
+                kills,
+            });
+        }
+    }
 
     let template = IndexTemplate {
-        kills: final_kills,
+        daily_groups,
         mapping_text: params.mapping_input,
         zkill_link: params.zkill_link,
-        // Send back the ACTUAL dates used (in case we clamped them)
-        start_date: start_cutoff.format("%Y-%m-%d").to_string(),
-        end_date: end_cutoff.format("%Y-%m-%d").to_string(),
+        start_date: params.start_date,
+        end_date: params.end_date,
         total_payout_str: format_isk(total_dropped_value),
         total_humans: active_humans,
         beneficiaries,

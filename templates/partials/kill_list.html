@@ -1,73 +1,122 @@
 <div class="card full-width">
-  <div
-    style="
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 15px;
-    "
-  >
-    <h3>3. Kill Log</h3>
-    <small>Zero-value drops are hidden.</small>
-  </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h3>3. Kill Log</h3>
+        <small>Zero-value drops are hidden.</small>
+    </div>
+    
+    <style>
+        .zkill-date-header {
+            background: #333;
+            color: #ccc;
+            font-weight: bold;
+            padding: 8px 12px;
+            font-size: 0.9em;
+            text-align: center;
+            border-radius: 4px;
+            margin-top: 15px;
+            margin-bottom: 5px;
+        }
+        
+        .zkill-icon {
+            width: 32px;
+            height: 32px;
+            vertical-align: middle;
+            border-radius: 2px;
+            margin-right: 8px;
+        }
+        
+        .zkill-icon-lg {
+            width: 48px;
+            height: 48px;
+            border-radius: 4px;
+        }
 
-  <table class="zkill-table">
-    <thead>
-      <tr style="color: #666; font-size: 0.8em; text-transform: uppercase">
-        <th></th>
-        <th>Time</th>
-        <th>Victim / Corp</th>
-        <th style="text-align: center">Attackers</th>
-        <th style="text-align: right">Dropped Value</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for kill in kills %}
-      <tr class="zkill-row {% if !kill.is_active %}excluded{% endif %}">
-        <td class="check-cell">
-          <input
-            type="checkbox"
-            name="active_kill"
-            value="{{ kill.killmail_id }}"
-            {%
-            if
-            kill.is_active
-            %}checked{%
-            endif
-            %}
-            onchange="submitForm()"
-          />
-        </td>
+        .flex-cell {
+            display: flex;
+            align-items: center;
+        }
+    </style>
 
-        <td class="time-cell">
-          <a
-            href="https://zkillboard.com/kill/{{ kill.killmail_id }}/"
-            target="_blank"
-            >{{ kill.killmail_time }}</a
-          >
-        </td>
+    <table class="zkill-table">
+        <thead>
+            <tr style="color: #666; font-size: 0.8em; text-transform: uppercase;">
+                <th width="30"></th> <!-- Checkbox -->
+                <th width="60">Time</th>
+                <th>Ship</th>
+                <th>System</th>
+                <th>Victim</th>
+                <th>Final Blow</th>
+                <th style="text-align: right;">Value</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for group in daily_groups %}
+                <!-- DATE HEADER -->
+                <tr>
+                    <td colspan="7" class="zkill-date-header">{{ group.date_display }}</td>
+                </tr>
 
-        <td class="victim-cell">
-          {% if let Some(v) = kill.victim %}
-          <span class="victim-name"
-            >{{ v.character_name.as_deref().unwrap_or("Unknown") }}</span
-          >
-          <span class="victim-corp"
-            >{{ v.corporation_name.as_deref().unwrap_or("-") }}</span
-          >
-          {% else %}
-          <span class="victim-name">Loading...</span>
-          {% endif %}
-        </td>
+                {% for kill in group.kills %}
+                <tr class="zkill-row {% if !kill.is_active %}excluded{% endif %}">
+                    <td class="check-cell">
+                        <input type="checkbox" name="active_kill" value="{{ kill.killmail_id }}" 
+                            {% if kill.is_active %}checked{% endif %} 
+                            onchange="submitForm()">
+                    </td>
+                    
+                    <td class="time-cell">
+                        <!-- Format HH:MM:SS from 2023-11-29T12:34:56Z -->
+                        <a href="https://zkillboard.com/kill/{{ kill.killmail_id }}/" target="_blank">
+                            {{ kill.killmail_time.split('T').last().unwrap_or("").trim_end_matches('Z') }}
+                        </a>
+                    </td>
+                    
+                    <td style="white-space: nowrap;">
+                        {% if let Some(v) = kill.victim %}
+                            <div class="flex-cell">
+                                <img src="https://images.evetech.net/types/{{ v.ship_type_id }}/icon?size=64" class="zkill-icon" title="{{ v.ship_type_name.as_deref().unwrap_or("Unknown Ship") }}">
+                                <span>{{ v.ship_type_name.as_deref().unwrap_or("-") }}</span>
+                            </div>
+                        {% endif %}
+                    </td>
 
-        <td class="attacker-cell">{{ kill.attackers.len() }}</td>
+                    <td>
+                        {{ kill.solar_system_name.as_deref().unwrap_or("-") }}
+                    </td>
+                    
+                    <td class="victim-cell">
+                        {% if let Some(v) = kill.victim %}
+                            <div class="flex-cell">
+                                {% if let Some(cid) = v.character_id %}
+                                    <img src="https://images.evetech.net/characters/{{ cid }}/portrait?size=64" class="zkill-icon" style="width:24px; height:24px;">
+                                {% endif %}
+                                <div>
+                                    <span class="victim-name">{{ v.character_name.as_deref().unwrap_or("Unknown") }}</span>
+                                    <span class="victim-corp">{{ v.corporation_name.as_deref().unwrap_or("-") }}</span>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </td>
 
-        <td class="value-cell">
-          <div class="money">{{ kill.formatted_dropped }}</div>
-          <div class="money-muted">Dropped</div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+                    <td class="attacker-cell" style="text-align: left; width: auto;">
+                        {% for att in kill.attackers %}
+                            {% if att.final_blow %}
+                                <div class="flex-cell">
+                                    {% if let Some(cid) = att.character_id %}
+                                        <img src="https://images.evetech.net/characters/{{ cid }}/portrait?size=64" class="zkill-icon" style="width:24px; height:24px;" title="Final Blow">
+                                    {% endif %}
+                                    <span style="font-size: 0.9em; color: #ccc;">{{ att.character_name.as_deref().unwrap_or("Unknown") }}</span>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                    </td>
+                    
+                    <td class="value-cell">
+                        <div class="money">{{ kill.formatted_dropped }}</div>
+                    </td>
+                </tr>
+                {% endfor %}
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
